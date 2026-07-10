@@ -3,7 +3,7 @@ module github.com/go-rio/mysql
 go 1.25.0
 
 require (
-	github.com/go-rio/rio v0.4.0
+	github.com/go-rio/rio v0.5.0
 	github.com/go-sql-driver/mysql v1.10.0
 )
 
