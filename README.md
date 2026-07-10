@@ -119,6 +119,10 @@ which reacts to *any* unique index on the table, so `rio.OnConflict(...)`
 documents intent rather than constraining which index fires — a documented
 semantic difference rio does not paper over.
 
+The `DoUpdate` branch names the would-be inserted row with the 8.0.19+ row
+alias (`VALUES()` is deprecated there): it needs MySQL 8.0.19 or newer, and
+MariaDB — which implements neither — supports `DoNothing` only.
+
 ## License
 
 The [MIT License](LICENSE). Copyright (c) 2026-now TreeNewBee.
