@@ -123,6 +123,35 @@ The `DoUpdate` branch names the would-be inserted row with the 8.0.19+ row
 alias (`VALUES()` is deprecated there): it needs MySQL 8.0.19 or newer, and
 MariaDB — which implements neither — supports `DoNothing` only.
 
+## Performance: the prepare round-trip
+
+go-sql-driver runs every parameterized query as prepare + execute — two
+blocking round-trips per statement. On a local MySQL 8.4 that doubles
+single-statement latency (~210µs vs ~105µs in rio's bench suite). Two ways
+to get the round-trip back, measured on rio's three-leg benchmarks:
+
+- **`interpolateParams=true` in the DSN** interpolates arguments client-side
+  and sends one plain query: ReadOne −45%, Insert −48%, Update −46%,
+  InsertBatch100 −24%. The driver refuses the option under charsets where
+  escaping would be unsafe (big5, gbk, sjis, …); with the default utf8mb4 it
+  is safe. rio never injects this option — the DSN stays yours:
+
+  ```go
+  db, err := mysql.Open("user:pass@tcp(127.0.0.1:3306)/app?interpolateParams=true")
+  ```
+
+- **`rio.WithStmtCache()`** keeps server-side prepared statements and reuses
+  them per SQL text: ReadOne −35%, Insert −46%. Prefer it when you want the
+  binary protocol or per-column type fidelity; avoid it behind
+  transaction-mode connection poolers.
+
+  ```go
+  db, err := mysql.Open(dsn, rio.WithStmtCache())
+  ```
+
+Both level off multi-row reads less (the per-row transfer dominates), and
+they compose with everything else in rio unchanged.
+
 ## License
 
 The [MIT License](LICENSE). Copyright (c) 2026-now TreeNewBee.
