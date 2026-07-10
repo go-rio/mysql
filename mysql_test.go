@@ -62,6 +62,9 @@ func TestSanitizeDSNKeepsExplicitTrue(t *testing.T) {
 		"root@tcp(localhost:3306)/app?parseTime=True",
 		// The last occurrence wins in the driver; true wins here.
 		"root@tcp(localhost:3306)/app?parseTime=false&parseTime=true",
+		// A safe explicit sql_mode is the caller's choice and survives
+		// byte for byte like every other option.
+		"root@tcp(localhost:3306)/app?parseTime=true&sql_mode=%27STRICT_TRANS_TABLES%27",
 	}
 	for _, dsn := range dsns {
 		got, err := sanitizeDSN(dsn)
@@ -115,6 +118,110 @@ func TestSanitizeDSNAllowsClientFoundRows(t *testing.T) {
 	}
 }
 
+func TestSanitizeDSNRejectsLexBreakingSQLMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		dsn     string
+		mention string // the offending token the error must name
+	}{
+		{"NO_BACKSLASH_ESCAPES alone",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27NO_BACKSLASH_ESCAPES%27", "NO_BACKSLASH_ESCAPES"},
+		{"ANSI_QUOTES alone",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27ANSI_QUOTES%27", "ANSI_QUOTES"},
+		{"mixed into a longer list",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27STRICT_TRANS_TABLES,NO_BACKSLASH_ESCAPES,NO_ENGINE_SUBSTITUTION%27", "NO_BACKSLASH_ESCAPES"},
+		{"combination mode ANSI",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27ANSI%27", "ANSI"},
+		{"vendor combination mode",
+			"root@tcp(localhost:3306)/app?sql_mode=%27ORACLE%27", "ORACLE"},
+		{"lower-case spelling",
+			"root@tcp(localhost:3306)/app?sql_mode=%27ansi_quotes%27", "ANSI_QUOTES"},
+		{"upper-case variable name",
+			"root@tcp(localhost:3306)/app?SQL_MODE=%27ANSI%27", "ANSI"},
+		{"unquoted value",
+			"root@tcp(localhost:3306)/app?sql_mode=NO_BACKSLASH_ESCAPES", "NO_BACKSLASH_ESCAPES"},
+		{"space after the comma",
+			"root@tcp(localhost:3306)/app?sql_mode=%27TRADITIONAL,+ANSI_QUOTES%27", "ANSI_QUOTES"},
+		{"raw unencoded quotes",
+			"root@tcp(localhost:3306)/app?sql_mode='ANSI'", "ANSI"},
+		{"last duplicate wins in the driver; it is the bad one",
+			"root@tcp(localhost:3306)/app?sql_mode=%27TRADITIONAL%27&sql_mode=%27ANSI_QUOTES%27", "ANSI_QUOTES"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sanitizeDSN(tt.dsn)
+			if err == nil {
+				t.Fatalf("sanitizeDSN(%q) = %q, want an error for a lexing-breaking sql_mode", tt.dsn, got)
+			}
+			if !strings.Contains(err.Error(), "sql_mode") {
+				t.Errorf("sanitizeDSN(%q) error %q does not mention sql_mode", tt.dsn, err)
+			}
+			if !strings.Contains(err.Error(), tt.mention) {
+				t.Errorf("sanitizeDSN(%q) error %q does not name the offending mode %q", tt.dsn, err, tt.mention)
+			}
+		})
+	}
+}
+
+func TestSanitizeDSNAllowsSafeSQLMode(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+	}{
+		{"MySQL 8 factory default list",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION%27"},
+		{"TRADITIONAL implies no lexing change",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27TRADITIONAL%27"},
+		{"empty mode disables everything",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27%27"},
+		// Matching is per comma-separated token, never substring; unknown
+		// tokens are the server's to reject, not ours.
+		{"unknown token passes through",
+			"root:secret@tcp(localhost:3306)/app?sql_mode=%27ANSII%27"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sanitizeDSN(tt.dsn)
+			if err != nil {
+				t.Fatalf("sanitizeDSN(%q) returned error: %v", tt.dsn, err)
+			}
+			cfg, err := mysql.ParseDSN(got)
+			if err != nil {
+				t.Fatalf("sanitized DSN %q does not parse: %v", got, err)
+			}
+			wantCfg, err := mysql.ParseDSN(tt.dsn)
+			if err != nil {
+				t.Fatalf("ParseDSN(%q): %v", tt.dsn, err)
+			}
+			if cfg.Params["sql_mode"] != wantCfg.Params["sql_mode"] {
+				t.Errorf("sanitizeDSN(%q) changed sql_mode from %q to %q",
+					tt.dsn, wantCfg.Params["sql_mode"], cfg.Params["sql_mode"])
+			}
+			if !cfg.ParseTime {
+				t.Errorf("sanitized DSN %q does not enable parseTime", got)
+			}
+		})
+	}
+}
+
+func TestSanitizeDSNDoesNotInjectSQLMode(t *testing.T) {
+	// Open cannot see the server's sql_mode (it never connects), so it must
+	// not guess one either: a DSN without sql_mode stays without sql_mode.
+	got, err := sanitizeDSN("root:secret@tcp(localhost:3306)/app")
+	if err != nil {
+		t.Fatalf("sanitizeDSN: %v", err)
+	}
+	cfg, err := mysql.ParseDSN(got)
+	if err != nil {
+		t.Fatalf("ParseDSN(%q): %v", got, err)
+	}
+	for key := range cfg.Params {
+		if strings.EqualFold(key, "sql_mode") {
+			t.Fatalf("sanitizeDSN injected sql_mode: %q", got)
+		}
+	}
+}
+
 func TestSanitizeDSNInvalid(t *testing.T) {
 	if _, err := sanitizeDSN("this is not a dsn"); err == nil {
 		t.Fatal("sanitizeDSN accepted a DSN without a slash")
@@ -129,6 +236,17 @@ func TestOpenRejectsExplicitParseTimeFalse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parseTime") {
 		t.Errorf("Open error %q does not mention parseTime", err)
+	}
+}
+
+func TestOpenRejectsLexBreakingSQLMode(t *testing.T) {
+	db, err := Open("root:secret@tcp(localhost:3306)/app?sql_mode=%27NO_BACKSLASH_ESCAPES%27")
+	if err == nil {
+		_ = db.Close()
+		t.Fatal("Open accepted a sql_mode with NO_BACKSLASH_ESCAPES")
+	}
+	if !strings.Contains(err.Error(), "sql_mode") {
+		t.Errorf("Open error %q does not mention sql_mode", err)
 	}
 }
 

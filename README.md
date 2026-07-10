@@ -41,7 +41,7 @@ users, err := rio.From[User]().Where("age > ?", 18).All(ctx, db)
 ```
 
 `Open` accepts every `rio.Option`. If you already manage your own `*sql.DB`,
-wrap it instead — but then the parseTime setting is on you:
+wrap it instead — but then parseTime and sql_mode (see below) are on you:
 
 ```go
 sqlDB, err := sql.Open("mysql", dsn) // must include parseTime=true
@@ -63,6 +63,37 @@ surprising you:
 applications we recommend storing UTC — the driver's default `loc` — and
 converting to local time at the edges; rio already writes `time.Time` values
 as UTC truncated to microseconds.
+
+## sql_mode
+
+rio rewrites `?` placeholders by lexing your SQL with MySQL's **default**
+lexical rules: backslashes escape characters inside string literals, and
+`"double quoted"` text is a string. Two `sql_mode` flags change that lexing
+on the server side, so they are not supported:
+
+- `NO_BACKSLASH_ESCAPES` — backslash becomes an ordinary character;
+- `ANSI_QUOTES` — double quotes delimit identifiers instead of strings
+  (also implied by the combination modes `ANSI` and, on MariaDB and
+  MySQL ≤ 5.7, `DB2`/`MAXDB`/`MSSQL`/`ORACLE`/`POSTGRESQL`).
+
+Under either mode a literal in your SQL could hide or expose a `?`
+differently on each side. rio fails loudly — a placeholder/argument arity
+error, never a misbound query — but the fix belongs in the DSN. `Open`
+keeps the invariant the same way it keeps parseTime:
+
+- DSN sets a `sql_mode` without those modes → passed through untouched (the
+  driver runs `SET sql_mode='...'` on every new connection).
+- DSN sets a `sql_mode` containing one of them → `Open` returns an error
+  naming the offending mode.
+- DSN does not mention `sql_mode` → nothing is injected; the session keeps
+  the server's default. `Open` never connects, so it cannot inspect that
+  default — if your server enables `NO_BACKSLASH_ESCAPES` or `ANSI_QUOTES`
+  globally, override the mode for rio's connections in the DSN (`%27` is a
+  URL-encoded `'`), e.g. MySQL 8's factory default list:
+
+  ```text
+  user:password@tcp(localhost:3306)/app?sql_mode=%27ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION%27
+  ```
 
 ## Error translation
 
