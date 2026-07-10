@@ -1,11 +1,9 @@
 # mysql
 
-[![Doc](https://pkg.go.dev/badge/github.com/go-rio/mysql)](https://pkg.go.dev/github.com/go-rio/mysql)
+[![Doc](https://pkg.go.dev/badge/github.com/go-rio/mysql.svg)](https://pkg.go.dev/github.com/go-rio/mysql)
 [![Go](https://img.shields.io/github/go-mod/go-version/go-rio/mysql)](https://go.dev/)
 [![Release](https://img.shields.io/github/release/go-rio/mysql.svg)](https://github.com/go-rio/mysql/releases)
-[![Test](https://github.com/go-rio/mysql/actions/workflows/test.yml/badge.svg)](https://github.com/go-rio/mysql/actions)
-[![Report Card](https://goreportcard.com/badge/github.com/go-rio/mysql)](https://goreportcard.com/report/github.com/go-rio/mysql)
-[![Stars](https://img.shields.io/github/stars/go-rio/mysql?style=flat)](https://github.com/go-rio/mysql)
+[![Test](https://github.com/go-rio/mysql/actions/workflows/test.yml/badge.svg)](https://github.com/go-rio/mysql/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/go-rio/mysql)](https://opensource.org/license/MIT)
 
 MySQL driver module for [rio](https://github.com/go-rio/rio), backed by
