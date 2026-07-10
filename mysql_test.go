@@ -97,6 +97,24 @@ func TestSanitizeDSNRejectsExplicitFalse(t *testing.T) {
 	}
 }
 
+func TestSanitizeDSNAllowsClientFoundRows(t *testing.T) {
+	dsn := "root:secret@tcp(localhost:3306)/app?clientFoundRows=true"
+	got, err := sanitizeDSN(dsn)
+	if err != nil {
+		t.Fatalf("sanitizeDSN(%q): %v", dsn, err)
+	}
+	cfg, err := mysql.ParseDSN(got)
+	if err != nil {
+		t.Fatalf("ParseDSN(%q): %v", got, err)
+	}
+	if !cfg.ClientFoundRows {
+		t.Fatalf("sanitizeDSN(%q) did not preserve clientFoundRows=true: %q", dsn, got)
+	}
+	if !cfg.ParseTime {
+		t.Fatalf("sanitizeDSN(%q) did not still add parseTime=true: %q", dsn, got)
+	}
+}
+
 func TestSanitizeDSNInvalid(t *testing.T) {
 	if _, err := sanitizeDSN("this is not a dsn"); err == nil {
 		t.Fatal("sanitizeDSN accepted a DSN without a slash")

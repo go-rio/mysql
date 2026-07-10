@@ -23,9 +23,9 @@ import (
 // driver option parseTime=true. Open therefore appends parseTime=true when
 // the DSN does not mention the option, and returns an error when the DSN
 // explicitly sets parseTime=false instead of silently overriding a choice the
-// caller spelled out. Every other option — including loc — passes through
-// untouched, so existing data keeps its meaning; the README explains why new
-// applications should store UTC.
+// caller spelled out. Every other option — including loc and
+// clientFoundRows — passes through untouched, so existing data keeps its
+// meaning; the README explains why new applications should store UTC.
 //
 // Like database/sql, Open validates its arguments without connecting; ping
 // the handle returned by Unwrap to verify the server is reachable.
@@ -50,9 +50,9 @@ func New(db *sql.DB, opts ...rio.Option) *rio.DB {
 	return rio.New(db, rio.MySQL, append([]rio.Option{rio.WithErrorTranslator(translate)}, opts...)...)
 }
 
-// sanitizeDSN validates the DSN and guarantees the parseTime=true driver mode
-// rio depends on. A DSN that never mentions parseTime gains parseTime=true; a
-// DSN that already sets it to true is returned byte for byte; a DSN that
+// sanitizeDSN validates the DSN and guarantees the parseTime driver mode rio
+// depends on. A DSN that never mentions parseTime gains parseTime=true; a DSN
+// that already sets it to true is returned byte for byte; a DSN that
 // explicitly sets it to false is rejected rather than silently rewritten.
 func sanitizeDSN(dsn string) (string, error) {
 	cfg, err := mysql.ParseDSN(dsn)
