@@ -1,9 +1,9 @@
 module github.com/go-rio/mysql
 
-go 1.25.0
+go 1.27rc2
 
 require (
-	github.com/go-rio/rio v0.9.0
+	github.com/go-rio/rio v0.10.0
 	github.com/go-sql-driver/mysql v1.10.0
 )
 
