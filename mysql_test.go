@@ -91,11 +91,6 @@ func TestSanitizeDSNRejectsExplicitFalse(t *testing.T) {
 	}
 }
 
-// CLIENT_FOUND_ROWS reports matched rows, and rio's write semantics — upsert
-// backfill (1 insert / 2 update / 0 no-change), optimistic locking, and the
-// idempotent zero-affected probes — are built on changed-rows counting: a
-// no-change conflict would be mislabeled a fresh insert and backfill a stale
-// LastInsertId into the primary key.
 func TestSanitizeDSNRejectsClientFoundRows(t *testing.T) {
 	dsns := []string{
 		"root:secret@tcp(localhost:3306)/app?clientFoundRows=true",
@@ -120,7 +115,7 @@ func TestSanitizeDSNRejectsLexBreakingSQLMode(t *testing.T) {
 	tests := []struct {
 		name    string
 		dsn     string
-		mention string // the offending token the error must name
+		mention string // token the error must name
 	}{
 		{
 			name:    "NO_BACKSLASH_ESCAPES alone",
@@ -369,7 +364,6 @@ type Book struct {
 
 func (Book) TableName() string { return "rio_mysql_books" }
 
-// openTestDB skips integration tests when RIO_MYSQL_DSN is unset.
 func openTestDB(t *testing.T) *rio.DB {
 	t.Helper()
 	dsn := os.Getenv("RIO_MYSQL_DSN")

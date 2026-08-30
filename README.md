@@ -25,112 +25,70 @@ defer db.Close()
 users, err := rio.From[User]().Where("age > ?", 18).All(ctx, db)
 ```
 
-`Open` accepts `rio.Option` values. To wrap an existing `*sql.DB`, use `New`
-with a DSN that already satisfies the requirements below:
-
-```go
-sqlDB, err := sql.Open("mysql", dsn) // must include parseTime=true
-if err != nil {
-	return err
-}
-db := mysql.New(sqlDB)
-```
+`Open` accepts `rio.Option` values, validates the DSN, and does not connect;
+use `db.Unwrap()` to ping or tune the underlying `*sql.DB`. `db.Close()`
+closes the statement cache (when enabled) and the `*sql.DB`. `New` wraps an
+existing `*sql.DB` and performs none of the DSN checks below.
 
 ## parseTime
 
-Scanning `DATETIME` or `TIMESTAMP` into `time.Time` requires `parseTime=true`.
-`Open`:
-
-- adds `parseTime=true` when omitted;
-- preserves an explicit true value;
-- rejects an explicit false value.
-
-`Open` does not change `loc`. rio normalizes bound `time.Time` values to UTC at
-microsecond precision.
+Scanning `DATETIME` or `TIMESTAMP` into `time.Time` requires
+`parseTime=true`. `Open` adds it when omitted, keeps an explicit true, and
+rejects an explicit false. It does not change `loc`; rio normalizes bound
+`time.Time` values to UTC at microsecond precision.
 
 ## sql_mode
 
 rio rewrites `?` placeholders using MySQL's default lexical rules. `Open`
-rejects modes that would make the server count placeholders differently:
+rejects modes that make the server count placeholders differently:
 
 | Mode | Effect |
 | --- | --- |
 | `NO_BACKSLASH_ESCAPES` | Backslash becomes an ordinary character. |
 | `ANSI_QUOTES` | Double quotes delimit identifiers instead of strings. |
 
-Combination modes `ANSI`, `DB2`, `MAXDB`, `MSSQL`, `ORACLE`, and `POSTGRESQL`
-are also rejected because they can imply `ANSI_QUOTES`. Matching is
-case-insensitive and applies to comma-separated mode tokens.
-
-Safe explicit modes pass through. When `sql_mode` is absent, `Open` does not
-inject one, so the connection uses the server default. Because `Open` does not
-connect, it cannot inspect that default. Override an incompatible global mode
-in the DSN (`%27` is a URL-encoded single quote):
+The combination modes `ANSI`, `DB2`, `MAXDB`, `MSSQL`, `ORACLE`, and
+`POSTGRESQL` are also rejected because they can imply `ANSI_QUOTES`.
+Matching is case-insensitive per comma-separated token. When the DSN sets no
+`sql_mode`, `Open` injects none — it does not connect, so it cannot inspect
+the server default. Override an incompatible global mode in the DSN (`%27`
+is a URL-encoded single quote):
 
 ```sh
 user:password@tcp(localhost:3306)/app?sql_mode=%27STRICT_TRANS_TABLES%27
 ```
 
-`New` cannot perform either the `parseTime` or `sql_mode` checks; configure the
-underlying driver before wrapping it.
+## clientFoundRows
 
-## Connections and transactions
-
-`Open` constructs a handle without connecting or tuning the connection pool.
-Use `db.Unwrap()` to ping or configure the underlying `*sql.DB`:
-
-```go
-sqlDB := db.Unwrap()
-sqlDB.SetMaxOpenConns(20)
-err := sqlDB.PingContext(ctx)
-```
-
-`db.Close()` closes rio's statement cache, when enabled, and the underlying
-`*sql.DB`. This also applies to a database passed to `New`.
-
-All rio operations accept either `*rio.DB` or `*rio.Tx`. `DB.Tx` commits when
-the callback returns nil and rolls back on an error or panic; nested `Tx.Tx`
-calls use savepoints:
-
-```go
-err := db.Tx(ctx, func(tx *rio.Tx) error {
-	return rio.Insert(ctx, tx, &user)
-})
-```
+`Open` rejects `clientFoundRows=true`. rio's upsert backfill, optimistic
+locking, and idempotent zero-affected updates are built on MySQL's default
+changed-rows counting.
 
 ## Error translation
 
-The module maps these MySQL errors to rio sentinels. Use `errors.Is` for the
-sentinel; the original `*mysql.MySQLError` remains available through
-`errors.As`.
+Use `errors.Is` for the sentinel; the original `*mysql.MySQLError` stays
+available through `errors.As`.
 
 | MySQL error | Sentinel |
 | --- | --- |
 | 1062 `ER_DUP_ENTRY` | `rio.ErrDuplicateKey` |
 | 1451 / 1452 (foreign key held or missing) | `rio.ErrForeignKeyViolated` |
 
-## Upsert semantics on MySQL
+## Upserts
 
-MySQL's `ON DUPLICATE KEY UPDATE` reacts to any unique index. Consequently,
-`rio.OnConflict(...)` records intent but cannot select which index fires.
-
-`DoUpdate` uses the row alias introduced in MySQL 8.0.19 and is not supported on
-MariaDB. `DoNothing` supports older MySQL versions and MariaDB.
+MySQL's `ON DUPLICATE KEY UPDATE` reacts to any unique index, so
+`rio.OnConflict(...)` cannot select which index fires. `DoUpdate` uses the
+row alias from MySQL 8.0.19 and is not supported on MariaDB; `DoNothing`
+works on older MySQL and MariaDB.
 
 ## Statement reuse
 
-`rio.WithStmtCache()` enables a bounded DB-level prepared-statement cache:
-
-```go
-db, err := mysql.Open(dsn, rio.WithStmtCache())
-```
-
-The cache is off by default. Enabling it also creates a bounded cache local to
-each transaction, which helps repeated parameterized statements avoid MySQL's
-prepare/execute cycle. Do not use it with transaction- or statement-mode
-connection poolers. As a client-side alternative, go-sql-driver supports the
-DSN option `interpolateParams=true` and rejects character sets for which
-interpolation is unsafe; rio does not enable it automatically.
+`mysql.Open(dsn, rio.WithStmtCache())` adds a bounded DB-level
+prepared-statement cache plus a cache local to each transaction. It is off
+by default; do not use it with transaction- or statement-mode connection
+poolers. As a client-side alternative, go-sql-driver supports
+`interpolateParams=true` and rejects character sets where interpolation is
+unsafe; rio never enables it automatically.
 
 ## Contributing
 
