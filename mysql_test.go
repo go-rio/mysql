@@ -91,21 +91,28 @@ func TestSanitizeDSNRejectsExplicitFalse(t *testing.T) {
 	}
 }
 
-func TestSanitizeDSNAllowsClientFoundRows(t *testing.T) {
-	dsn := "root:secret@tcp(localhost:3306)/app?clientFoundRows=true"
-	got, err := sanitizeDSN(dsn)
-	if err != nil {
-		t.Fatalf("sanitizeDSN(%q): %v", dsn, err)
+// CLIENT_FOUND_ROWS reports matched rows, and rio's write semantics — upsert
+// backfill (1 insert / 2 update / 0 no-change), optimistic locking, and the
+// idempotent zero-affected probes — are built on changed-rows counting: a
+// no-change conflict would be mislabeled a fresh insert and backfill a stale
+// LastInsertId into the primary key.
+func TestSanitizeDSNRejectsClientFoundRows(t *testing.T) {
+	dsns := []string{
+		"root:secret@tcp(localhost:3306)/app?clientFoundRows=true",
+		"root@tcp(localhost:3306)/app?loc=UTC&clientFoundRows=1&timeout=5s",
 	}
-	cfg, err := mysql.ParseDSN(got)
-	if err != nil {
-		t.Fatalf("ParseDSN(%q): %v", got, err)
+	for _, dsn := range dsns {
+		got, err := sanitizeDSN(dsn)
+		if err == nil {
+			t.Errorf("sanitizeDSN(%q) = %q, want an error for clientFoundRows", dsn, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "clientFoundRows") {
+			t.Errorf("sanitizeDSN(%q) error should name the option: %v", dsn, err)
+		}
 	}
-	if !cfg.ClientFoundRows {
-		t.Fatalf("sanitizeDSN(%q) did not preserve clientFoundRows=true: %q", dsn, got)
-	}
-	if !cfg.ParseTime {
-		t.Fatalf("sanitizeDSN(%q) did not still add parseTime=true: %q", dsn, got)
+	if _, err := sanitizeDSN("root@tcp(localhost:3306)/app?clientFoundRows=false"); err != nil {
+		t.Errorf("an explicit clientFoundRows=false is the default and must pass: %v", err)
 	}
 }
 

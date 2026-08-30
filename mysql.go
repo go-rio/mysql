@@ -12,9 +12,10 @@ import (
 )
 
 // Open creates a rio database from a go-sql-driver DSN without connecting.
-// It enables parseTime when omitted, rejects parseTime=false, and rejects
-// sql_mode values that change MySQL's default placeholder lexing, including
-// NO_BACKSLASH_ESCAPES and ANSI_QUOTES. Other DSN options pass through.
+// It enables parseTime when omitted, rejects parseTime=false, rejects
+// clientFoundRows=true, and rejects sql_mode values that change MySQL's
+// default placeholder lexing, including NO_BACKSLASH_ESCAPES and
+// ANSI_QUOTES. Other DSN options pass through.
 func Open(dsn string, opts ...rio.Option) (*rio.DB, error) {
 	dsn, err := sanitizeDSN(dsn)
 	if err != nil {
@@ -28,8 +29,9 @@ func Open(dsn string, opts ...rio.Option) (*rio.DB, error) {
 }
 
 // New wraps db with the MySQL dialect and error translator. It does not
-// validate the original DSN; callers must configure parseTime and sql_mode as
-// described by Open. Options may replace the default error translator.
+// validate the original DSN; callers must configure parseTime, sql_mode, and
+// clientFoundRows as described by Open. Options may replace the default
+// error translator.
 func New(db *sql.DB, opts ...rio.Option) *rio.DB {
 	return rio.New(db, rio.MySQL, append([]rio.Option{rio.WithErrorTranslator(translate)}, opts...)...)
 }
@@ -48,6 +50,17 @@ func sanitizeDSN(dsn string) (string, error) {
 				"so the two would count placeholders differently; "+
 				"use a sql_mode without NO_BACKSLASH_ESCAPES and ANSI_QUOTES",
 			bad,
+		)
+	}
+	if cfg.ClientFoundRows {
+		// Optimistic locking, the idempotent zero-affected probes, and the
+		// upsert backfill decision (1 insert / 2 update / 0 no-change) are
+		// all built on MySQL's changed-rows counting; CLIENT_FOUND_ROWS
+		// would silently mislabel a no-change conflict as a fresh insert.
+		return "", errors.New(
+			"mysql: dsn sets clientFoundRows=true, but rio's write semantics are built on " +
+				"MySQL's default changed-rows counting (upsert backfill, optimistic locking, " +
+				"idempotent updates); drop the option",
 		)
 	}
 	if cfg.ParseTime {
