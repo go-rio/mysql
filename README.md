@@ -27,8 +27,8 @@ users, err := rio.From[User]().Where("age > ?", 18).All(ctx, db)
 
 `Open` accepts `rio.Option` values, validates the DSN, and does not connect;
 use `db.Unwrap()` to ping or tune the underlying `*sql.DB`. `db.Close()`
-closes the statement cache (when enabled) and the `*sql.DB`. `New` wraps an
-existing `*sql.DB` and performs none of the DSN checks below.
+closes the statement cache and the `*sql.DB`. `New` wraps an existing
+`*sql.DB` and performs none of the DSN checks below.
 
 ## parseTime
 
@@ -71,8 +71,8 @@ available through `errors.As`.
 
 | MySQL error | Sentinel |
 | --- | --- |
-| 1062 `ER_DUP_ENTRY` | `rio.ErrDuplicateKey` |
-| 1451 / 1452 (foreign key held or missing) | `rio.ErrForeignKeyViolated` |
+| 1022 `ER_DUP_KEY`, 1062 `ER_DUP_ENTRY`, 1169 `ER_DUP_UNIQUE`, 1586 `ER_DUP_ENTRY_WITH_KEY_NAME` | `rio.ErrDuplicateKey` |
+| 1216 `ER_NO_REFERENCED_ROW`, 1217 `ER_ROW_IS_REFERENCED`, 1451 `ER_ROW_IS_REFERENCED_2`, 1452 `ER_NO_REFERENCED_ROW_2` | `rio.ErrForeignKeyViolated` |
 
 ## Upserts
 
@@ -83,12 +83,20 @@ works on older MySQL and MariaDB.
 
 ## Statement reuse
 
-`mysql.Open(dsn, rio.WithStmtCache())` adds a bounded DB-level
-prepared-statement cache plus a cache local to each transaction. It is off
-by default; do not use it with transaction- or statement-mode connection
-poolers. As a client-side alternative, go-sql-driver supports
-`interpolateParams=true` and rejects character sets where interpolation is
-unsafe; rio never enables it automatically.
+`Open` and `New` enable rio's bounded prepared-statement cache (one per
+`*rio.DB` plus one per transaction), so a parameterized query costs one
+round trip after its first use instead of a prepare plus an execute. Pass
+`rio.WithoutStmtCache()` to opt out; do so behind transaction- or
+statement-mode proxies that cannot hold prepared statements across
+requests:
+
+```go
+db, err := mysql.Open(dsn, rio.WithoutStmtCache())
+```
+
+Without the cache, go-sql-driver's `interpolateParams=true` skips the
+prepare round trip client-side and rejects character sets where
+interpolation is unsafe; rio never enables it automatically.
 
 ## Contributing
 

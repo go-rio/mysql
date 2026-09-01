@@ -8,3 +8,5 @@ require (
 )
 
 require filippo.io/edwards25519 v1.2.0 // indirect
+
+replace github.com/go-rio/rio => ../rio

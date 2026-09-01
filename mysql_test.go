@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -296,6 +297,20 @@ func TestOpenDoesNotConnect(t *testing.T) {
 	}
 }
 
+func TestNewWithoutStmtCache(t *testing.T) {
+	sqlDB, err := sql.Open("mysql", "root:secret@tcp(localhost:1)/nowhere?parseTime=true")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	db := New(sqlDB, rio.WithoutStmtCache())
+	if db.Unwrap() != sqlDB {
+		t.Fatal("Unwrap did not return the wrapped *sql.DB")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 func TestTranslate(t *testing.T) {
 	tests := []struct {
 		name string
@@ -324,6 +339,31 @@ func TestTranslate(t *testing.T) {
 				Number:  1452,
 				Message: "Cannot add or update a child row",
 			},
+			want: rio.ErrForeignKeyViolated,
+		},
+		{
+			name: "duplicate key",
+			err:  &mysql.MySQLError{Number: 1022, Message: "Can't write; duplicate key in table 'users'"},
+			want: rio.ErrDuplicateKey,
+		},
+		{
+			name: "duplicate unique",
+			err:  &mysql.MySQLError{Number: 1169, Message: "Can't write, because of unique constraint, to table 'users'"},
+			want: rio.ErrDuplicateKey,
+		},
+		{
+			name: "duplicate entry with key name",
+			err:  &mysql.MySQLError{Number: 1586, Message: "Duplicate entry 'a' for key 'email'"},
+			want: rio.ErrDuplicateKey,
+		},
+		{
+			name: "no referenced row without detail",
+			err:  &mysql.MySQLError{Number: 1216, Message: "Cannot add or update a child row: a foreign key constraint fails"},
+			want: rio.ErrForeignKeyViolated,
+		},
+		{
+			name: "row is referenced without detail",
+			err:  &mysql.MySQLError{Number: 1217, Message: "Cannot delete or update a parent row: a foreign key constraint fails"},
 			want: rio.ErrForeignKeyViolated,
 		},
 		{
@@ -364,13 +404,13 @@ type Book struct {
 
 func (Book) TableName() string { return "rio_mysql_books" }
 
-func openTestDB(t *testing.T) *rio.DB {
+func openTestDB(t *testing.T, opts ...rio.Option) *rio.DB {
 	t.Helper()
 	dsn := os.Getenv("RIO_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("RIO_MYSQL_DSN not set")
 	}
-	db, err := Open(dsn)
+	db, err := Open(dsn, opts...)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", dsn, err)
 	}
@@ -461,5 +501,23 @@ func TestIntegration(t *testing.T) {
 	}
 	if err := rio.Delete(ctx, db, &ada); !errors.Is(err, rio.ErrForeignKeyViolated) {
 		t.Fatalf("referenced delete error = %v, want rio.ErrForeignKeyViolated", err)
+	}
+}
+
+func TestIntegrationWithoutStmtCache(t *testing.T) {
+	db := openTestDB(t, rio.WithoutStmtCache())
+	ctx := context.Background()
+	createSchema(t, ctx, db)
+
+	ada := Author{Name: "Ada", Email: "ada@example.com"}
+	if err := rio.Insert(ctx, db, &ada); err != nil {
+		t.Fatalf("insert author: %v", err)
+	}
+	got, err := rio.Find[Author](ctx, db, ada.ID)
+	if err != nil {
+		t.Fatalf("find author: %v", err)
+	}
+	if got.Email != ada.Email {
+		t.Errorf("reloaded email = %q, want %q", got.Email, ada.Email)
 	}
 }

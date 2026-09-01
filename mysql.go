@@ -11,10 +11,11 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// Open creates a rio database from a go-sql-driver DSN without connecting.
-// It enables parseTime when omitted and rejects parseTime=false,
-// clientFoundRows=true, and sql_mode values that change placeholder lexing
-// (NO_BACKSLASH_ESCAPES, ANSI_QUOTES). Other DSN options pass through.
+// Open creates a rio database from a go-sql-driver DSN without connecting
+// and wraps it with New. It enables parseTime when omitted and rejects
+// parseTime=false, clientFoundRows=true, and sql_mode values that change
+// placeholder lexing (NO_BACKSLASH_ESCAPES, ANSI_QUOTES). Other DSN options
+// pass through.
 func Open(dsn string, opts ...rio.Option) (*rio.DB, error) {
 	dsn, err := sanitizeDSN(dsn)
 	if err != nil {
@@ -27,11 +28,15 @@ func Open(dsn string, opts ...rio.Option) (*rio.DB, error) {
 	return New(db, opts...), nil
 }
 
-// New wraps db with the MySQL dialect and error translator. It does not
-// validate the DSN; the caller must satisfy Open's parseTime, sql_mode, and
-// clientFoundRows contract. Options may replace the default translator.
+// New wraps db with the MySQL dialect, error translator, and rio's
+// prepared-statement cache. It does not validate the DSN; the caller must
+// satisfy Open's parseTime, sql_mode, and clientFoundRows contract. Later
+// options win: rio.WithErrorTranslator replaces the translator, and
+// rio.WithoutStmtCache disables the cache for transaction-mode proxies that
+// cannot hold prepared statements.
 func New(db *sql.DB, opts ...rio.Option) *rio.DB {
-	return rio.New(db, rio.MySQL, append([]rio.Option{rio.WithErrorTranslator(translate)}, opts...)...)
+	defaults := []rio.Option{rio.WithErrorTranslator(translate), rio.WithStmtCache()}
+	return rio.New(db, rio.MySQL, append(defaults, opts...)...)
 }
 
 // sanitizeDSN enables parseTime when omitted and rejects incompatible options.
@@ -116,9 +121,15 @@ func translate(err error) error {
 		return nil
 	}
 	switch me.Number {
-	case 1062: // ER_DUP_ENTRY
+	case 1022, // ER_DUP_KEY
+		1062, // ER_DUP_ENTRY
+		1169, // ER_DUP_UNIQUE
+		1586: // ER_DUP_ENTRY_WITH_KEY_NAME
 		return rio.ErrDuplicateKey
-	case 1451, 1452: // ER_ROW_IS_REFERENCED_2, ER_NO_REFERENCED_ROW_2
+	case 1216, // ER_NO_REFERENCED_ROW
+		1217, // ER_ROW_IS_REFERENCED
+		1451, // ER_ROW_IS_REFERENCED_2
+		1452: // ER_NO_REFERENCED_ROW_2
 		return rio.ErrForeignKeyViolated
 	}
 	return nil
