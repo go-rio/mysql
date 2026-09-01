@@ -1,0 +1,89 @@
+# go-rio/mysql
+
+> MySQL driver module for the rio ORM: DSN hygiene, error translation, and a prepared-statement cache on by default.
+
+## Overview
+
+`github.com/go-rio/mysql` connects `github.com/go-rio/rio` to MySQL through go-sql-driver/mysql. It validates the DSN (`parseTime`, `sql_mode`, `clientFoundRows`), installs the error translator that maps MySQL error numbers to rio sentinels, and turns on rio's statement cache. rio itself renders the SQL and owns query semantics.
+
+## Quick Start
+
+```bash
+go get github.com/go-rio/mysql
+```
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/go-rio/mysql"
+    "github.com/go-rio/rio"
+)
+
+type User struct {
+    ID    int64
+    Email string
+    Age   int
+}
+
+func main() {
+    db, err := mysql.Open("user:password@tcp(localhost:3306)/app")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+    users, err := rio.From[User]().Where("age > ?", 18).All(context.Background(), db)
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Println(len(users))
+}
+```
+
+## Key Concepts
+
+- **Open validates, New wraps**: `Open` checks the DSN without connecting; `New` wraps an existing `*sql.DB` and trusts the caller.
+- **parseTime is mandatory**: `Open` adds `parseTime=true` and rejects an explicit `false`, because rio scans `DATETIME`/`TIMESTAMP` into `time.Time`.
+- **Placeholder lexing**: rio rewrites `?` assuming MySQL's default lexing; `sql_mode` values `NO_BACKSLASH_ESCAPES` and `ANSI_QUOTES` (and combination modes implying them) are rejected.
+- **Changed-rows counting**: `clientFoundRows=true` is rejected; upsert backfill and optimistic locking depend on the default.
+- **Statement cache**: on by default; `rio.WithoutStmtCache()` opts out behind transaction-mode proxies.
+
+## API Reference
+
+### Core Functions
+
+- `Open(dsn string, opts ...rio.Option) (*rio.DB, error)` - validate the DSN, open lazily, install the translator and the statement cache.
+- `New(db *sql.DB, opts ...rio.Option) *rio.DB` - wrap an existing pool with the MySQL dialect, translator, and statement cache; no DSN checks.
+
+## Common Patterns
+
+### Opting out of the statement cache
+
+```go
+db, err := mysql.Open(dsn, rio.WithoutStmtCache())
+```
+
+### Tuning the pool
+
+```go
+db, err := mysql.Open(dsn)
+db.Unwrap().SetMaxOpenConns(32)
+```
+
+## Error Handling
+
+- `rio.ErrDuplicateKey` - MySQL errors 1022, 1062, 1169, 1586; the `*mysql.MySQLError` stays in the chain for `errors.As`.
+- `rio.ErrForeignKeyViolated` - MySQL errors 1216, 1217, 1451, 1452.
+- `Open` errors - a DSN that fails `mysql.ParseDSN`, sets `parseTime=false`, sets `clientFoundRows=true`, or sets an incompatible `sql_mode`.
+
+## References
+
+- Documentation: https://github.com/go-rio/mysql/blob/main/README.md
+- Changelog: https://github.com/go-rio/mysql/blob/main/CHANGELOG.md
+- Repository: https://github.com/go-rio/mysql
+- Go Reference: https://pkg.go.dev/github.com/go-rio/mysql
+- Core ORM: https://github.com/go-rio/rio
+- Issues: https://github.com/go-rio/mysql/issues
