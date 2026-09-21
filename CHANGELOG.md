@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-09-22
+
+### Changed
+
+- rio v0.19.1.
+
 ## [0.5.5] - 2026-09-22
 
 ### Changed
